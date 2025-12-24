@@ -1,4 +1,4 @@
-# VERSAO V48 - SISTEMA RESTAURADO
+# VERSAO V49 - O GERENTE (DIAGNOSTICO E RESET)
 import os
 import requests
 import sqlite3
@@ -63,7 +63,60 @@ def ler_historico(phone):
 
 init_db()
 
-# --- INTEGRAÇÃO WHATSAPP ---
+# --- FERRAMENTAS DE GESTÃO (NOVAS) ---
+
+@app.route('/fix/raio_x', methods=['GET'])
+def raio_x():
+    # Mostra quantos leads estão em cada status
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute("SELECT status, COUNT(*) FROM leads GROUP BY status")
+        resumo = c.fetchall()
+        
+        # Pega total geral
+        c.execute("SELECT COUNT(*) FROM leads")
+        total = c.fetchone()[0]
+        
+        conn.close()
+        return jsonify({
+            "total_leads": total,
+            "status_distribuicao": dict(resumo),
+            "diagnostico": "Se 'FILA_AQUECIMENTO' for 0, o robô parou."
+        })
+    except Exception as e:
+        return jsonify({"erro": str(e)})
+
+@app.route('/fix/destravar_fila', methods=['GET'])
+def destravar_fila():
+    # Reinicia leads que não receberam mensagem hoje
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        
+        # Define 'Hoje' para proteger quem já falou
+        hoje = datetime.datetime.now().strftime('%Y-%m-%d')
+        
+        # SQL: Volte para a fila TODO MUNDO que NÃO falou hoje
+        # A lógica é: Se a última interação não foi hoje, volta pra fila.
+        c.execute('''
+            UPDATE leads 
+            SET status = 'FILA_AQUECIMENTO' 
+            WHERE last_interaction < date('now', 'start of day') 
+               OR last_interaction IS NULL
+        ''')
+        afetados = c.rowcount
+        conn.commit()
+        conn.close()
+        return jsonify({
+            "status": "Fila Destravada",
+            "leads_reiniciados": afetados,
+            "msg": "Agora dispare o Cron novamente."
+        })
+    except Exception as e:
+        return jsonify({"erro": str(e)})
+
+# --- INTEGRAÇÃO E IA (MANTIDOS) ---
 def enviar_zap(telefone, texto):
     clean_phone = "".join(filter(str.isdigit, str(telefone)))
     if len(clean_phone) == 12 and clean_phone.startswith("55"):
@@ -75,7 +128,6 @@ def enviar_zap(telefone, texto):
         requests.post(url, json={"number": clean_phone, "text": texto}, headers=headers)
     except: pass
 
-# --- PROFILER E IA ---
 def analisar_vulnerabilidades(phone, texto_usuario):
     try:
         prompt = f"""Analise a frase e extraia tags: familia, veiculo, saude, renda. Frase: {texto_usuario}. Responda apenas as tags."""
@@ -118,27 +170,6 @@ def responder_chat_inteligente(phone, msg_usuario, nome_cliente):
         enviar_zap(phone, texto_resp)
     except: pass
 
-# --- NOVO: ROTA DE LIMPEZA DE DUPLICATAS ---
-@app.route('/fix/limpeza', methods=['GET'])
-def limpar_duplicatas():
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute('''
-            DELETE FROM leads 
-            WHERE rowid NOT IN (
-                SELECT MAX(rowid) 
-                FROM leads 
-                GROUP BY phone
-            )
-        ''')
-        removidos = c.rowcount
-        conn.commit()
-        conn.close()
-        return jsonify({"status": "Limpeza Concluída", "duplicatas_removidas": removidos})
-    except Exception as e:
-        return jsonify({"erro": str(e)})
-
 # --- WORKER ANTI-DUPLICIDADE ---
 def ja_falou_hoje(phone):
     try:
@@ -158,6 +189,7 @@ def processar_aquecimento():
 
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
+    # Pega leads e protege contra duplicidade na seleção
     c.execute("SELECT phone, nome FROM leads WHERE status = 'FILA_AQUECIMENTO' GROUP BY phone LIMIT 20")
     lote = c.fetchall()
     conn.close()
@@ -171,6 +203,7 @@ def processar_aquecimento():
             try:
                 if ja_falou_hoje(p):
                     print(f"🚫 Pulando {p} (Já recebeu mensagem hoje)")
+                    # Tira da fila para não travar, mas mantém como ativo
                     c_w.execute("UPDATE leads SET status = 'ATIVO' WHERE phone = ?", (p,))
                     conn_w.commit()
                     continue
@@ -185,7 +218,19 @@ def processar_aquecimento():
         conn_w.close()
 
     threading.Thread(target=worker, args=(lote,)).start()
-    return jsonify({"status": "Lote V47 Iniciado", "qtd": len(lote)})
+    return jsonify({"status": "Lote V49 Iniciado", "qtd": len(lote)})
+
+@app.route('/fix/limpeza', methods=['GET'])
+def limpar_duplicatas():
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute(''' DELETE FROM leads WHERE rowid NOT IN (SELECT MAX(rowid) FROM leads GROUP BY phone) ''')
+        removidos = c.rowcount
+        conn.commit()
+        conn.close()
+        return jsonify({"status": "Limpeza Concluída", "duplicatas_removidas": removidos})
+    except: return jsonify({"erro": "falha db"})
 
 @app.route('/importar_leads', methods=['POST'])
 def importar_leads():
@@ -196,6 +241,7 @@ def importar_leads():
     for l in lista:
         try:
             p = "".join(filter(str.isdigit, str(l.get('phone'))))
+            # Insere como FILA_AQUECIMENTO
             cur.execute("INSERT INTO leads (phone, nome, status, last_interaction, origem) VALUES (?, ?, 'FILA_AQUECIMENTO', ?, 'Base')", (p, l.get('nome','Investidor'), datetime.datetime.now()))
             c += 1
         except: pass
@@ -204,8 +250,7 @@ def importar_leads():
     return jsonify({"status": "Importado", "qtd": c})
 
 @app.route('/webhook/google-ads', methods=['POST'])
-def google_ads_hook():
-    return jsonify({"status": "received"}), 200
+def google_ads_hook(): return jsonify({"status": "received"}), 200
 
 @app.route('/webhook/whatsapp', methods=['POST'])
 def whatsapp_hook():
@@ -222,7 +267,7 @@ def whatsapp_hook():
     except: return jsonify({"status": "error"}), 500
 
 @app.route('/', methods=['GET'])
-def health(): return jsonify({"status": "Roberto V47 - Restaurado"}), 200
+def health(): return jsonify({"status": "Roberto V49 - Gerente"}), 200
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
