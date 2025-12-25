@@ -1,4 +1,4 @@
-# VERSAO V58 - O CONSULTOR EQUILIBRADO (RAPPORT + EFICIENCIA)
+# VERSAO V59 - O ESTRATEGISTA (FUNIL PASSO A PASSO)
 import os
 import requests
 import datetime
@@ -27,7 +27,7 @@ LINK_AGENDA = "https://calendar.app.google/HxFwGyHA4zihQE27A"
 if GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
 
-# --- BANCO DE DADOS (Conexão Segura) ---
+# --- BANCO DE DADOS ---
 def get_db_connection():
     return psycopg2.connect(DATABASE_URL)
 
@@ -37,20 +37,22 @@ def init_db():
         cur = conn.cursor()
         cur.execute('''CREATE TABLE IF NOT EXISTS messages 
                        (phone TEXT, role TEXT, content TEXT, timestamp TIMESTAMP)''')
+        # Adicionamos colunas para guardar as respostas do cliente
         cur.execute('''CREATE TABLE IF NOT EXISTS leads 
                        (phone TEXT PRIMARY KEY, nome TEXT, status TEXT, 
                         last_interaction TIMESTAMP, origem TEXT, 
                         funnel_stage INTEGER DEFAULT 0, 
-                        tags TEXT DEFAULT '', current_product TEXT DEFAULT 'CONSORCIO')''')
+                        tags TEXT DEFAULT '', 
+                        dados_extra TEXT DEFAULT '{}')''')
         conn.commit()
         conn.close()
-        print("✅ V58: Consultor Equilibrado Ativo")
+        print("✅ V59: Máquina de Estados Ativa")
     except Exception as e:
         print(f"❌ Erro Banco: {e}")
 
 init_db()
 
-# --- FUNÇÕES AUXILIARES ---
+# --- AUXILIARES ---
 def salvar_msg(phone, role, content, nome="Cliente"):
     try:
         conn = get_db_connection()
@@ -73,7 +75,7 @@ def ler_historico(phone):
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("SELECT role, content FROM messages WHERE phone = %s ORDER BY timestamp DESC LIMIT 12", (phone,))
+        cur.execute("SELECT role, content FROM messages WHERE phone = %s ORDER BY timestamp DESC LIMIT 14", (phone,))
         data = cur.fetchall()
         conn.close()
         return [{"role": row[0], "parts": [row[1]]} for row in reversed(data)]
@@ -83,108 +85,188 @@ def enviar_zap(telefone, texto):
     clean_phone = "".join(filter(str.isdigit, str(telefone)))
     if len(clean_phone) == 12 and clean_phone.startswith("55"):
         clean_phone = f"{clean_phone[:4]}9{clean_phone[4:]}"
-    
     url = f"{EVOLUTION_URL}/message/sendText/{INSTANCE}"
     headers = {"apikey": EVOLUTION_APIKEY, "Content-Type": "application/json"}
-    try:
-        requests.post(url, json={"number": clean_phone, "text": texto}, headers=headers)
+    try: requests.post(url, json={"number": clean_phone, "text": texto}, headers=headers)
     except: pass
 
-# --- 🧮 MOTOR DE SIMULAÇÃO (Matemática de Vendas) ---
-def extrair_valor(texto):
-    # Detecta 300k, 300.000, 300000
-    texto = texto.lower().replace('k', '000').replace('.', '')
-    numeros = re.findall(r'\d+', texto)
-    if not numeros: return 0
-    valores = [int(n) for n in numeros if int(n) > 10000] # Filtra anos ou numeros pequenos
-    return max(valores) if valores else 0
+# --- 🧠 O CÉREBRO DO FUNIL (Raciocínio de Estado) ---
 
-def calcular_simulacao(valor, tipo="imovel"):
-    # Parâmetros Ajustados para Realidade de Mercado
-    if "car" in tipo or "veic" in tipo or "auto" in tipo:
-        prazo = 80 # Média mercado auto
-        taxa_adm_total = 0.15 
-        juros_finan_mes = 0.021 # 2.1% am (Juros subiram)
-    elif "pesad" in tipo or "caminh" in tipo:
-        prazo = 100
-        taxa_adm_total = 0.14
-        juros_finan_mes = 0.019
-    else: # Imóvel
-        prazo = 180
-        taxa_adm_total = 0.23
-        juros_finan_mes = 0.012 # 1.2% am + TR
+def extrair_dados_ia(texto_usuario, estagio_atual, dados_atuais):
+    """
+    Usa IA para verificar se o usuário respondeu a pergunta da fase.
+    Retorna: (novo_estagio, dados_atualizados_json)
+    """
+    try:
+        prompt_analise = f"""
+        Analise a resposta do cliente.
+        Estágio Atual: {estagio_atual}
+        Dados já coletados: {dados_atuais}
+        Última mensagem do cliente: "{texto_usuario}"
 
-    # Consórcio
-    valor_total_cons = valor * (1 + taxa_adm_total)
-    parcela_cons = valor_total_cons / prazo
+        OBJETIVOS POR ESTÁGIO:
+        0: Abordagem inicial. Se cliente respondeu positivo, vá para 1.
+        1: Tipo de bem (Imóvel, Carro, Moto, Pesados).
+        2: Valor do crédito (R$).
+        3: Valor da parcela confortável (R$).
+        4: Tem lance, entrada ou FGTS?
+        5: Objetivo (Pressa, Investimento, Aposentadoria).
+        6: Fim (Já simulou).
 
-    # Financiamento (Price)
-    i = juros_finan_mes
-    parcela_finan = valor * (i * (1 + i)**prazo) / ((1 + i)**prazo - 1)
+        SAÍDA ESPERADA (JSON PURO):
+        {{"avancar": true/false, "dado_extraido": "valor ou null", "resetar": false}}
+        
+        Se o cliente mudou de assunto radicalmente, retorne "resetar": true.
+        Se ele respondeu a pergunta da fase, retorne "avancar": true e o dado.
+        """
+        
+        model = genai.GenerativeModel('gemini-2.0-flash')
+        resp = model.generate_content(prompt_analise)
+        analise = json.loads(resp.text.replace('```json','').replace('```','').strip())
+        
+        dados = json.loads(dados_atuais) if dados_atuais else {}
+        
+        if analise.get('resetar'):
+            return 1, dados # Volta pro início se o cliente se perder
+            
+        if analise.get('avancar'):
+            # Salva o dado da fase
+            if estagio_atual == 1: dados['tipo'] = analise.get('dado_extraido')
+            if estagio_atual == 2: dados['valor_credito'] = analise.get('dado_extraido')
+            if estagio_atual == 3: dados['parcela_max'] = analise.get('dado_extraido')
+            if estagio_atual == 4: dados['lance'] = analise.get('dado_extraido')
+            if estagio_atual == 5: dados['objetivo'] = analise.get('dado_extraido')
+            
+            return estagio_atual + 1, dados
+        
+        return estagio_atual, dados # Não avançou (cliente enrolou ou teve dúvida)
+        
+    except:
+        return estagio_atual, (json.loads(dados_atuais) if dados_atuais else {})
+
+def gerar_simulacao_final(dados):
+    # Lógica Matemática para o Gran Finale
+    try:
+        # Tenta limpar string de valor para float
+        val_str = str(dados.get('valor_credito', '0')).lower().replace('k','000').replace('.','').replace('r$','')
+        valor = float(re.search(r'\d+', val_str).group())
+    except: valor = 0
+
+    if valor == 0: return "Preciso que me confirme o valor para calcular."
+
+    tipo = str(dados.get('tipo', 'imovel')).lower()
     
-    economia = (parcela_finan * prazo) - valor_total_cons
+    # Parâmetros
+    if 'car' in tipo or 'veic' in tipo:
+        prazo = 80
+        taxa = 0.15
+        juros_banco = 0.021
+    else:
+        prazo = 180
+        taxa = 0.22
+        juros_banco = 0.011
+
+    parcela_cons = (valor * (1 + taxa)) / prazo
+    # Price simplificada
+    parcela_banco = valor * (juros_banco * (1 + juros_banco)**prazo) / ((1 + juros_banco)**prazo - 1)
+    
+    economia = (parcela_banco * prazo) - (parcela_cons * prazo)
 
     return f"""
-    [SISTEMA: Use estes dados para sua resposta]
-    - Crédito Desejado: R$ {valor:,.2f}
-    - Prazo Base: {prazo} meses
-    - 📉 Parcela Consórcio: R$ {parcela_cons:,.2f}
-    - 📈 Parcela Financiamento (Banco): R$ {parcela_finan:,.2f}
-    - 💰 ECONOMIA GERADA: R$ {economia:,.2f}
-    (Apresente isso de forma atraente e pergunte se cabe no bolso).
+    📋 *PROPOSTA OFICIAL CONSEG*
+    
+    Baseado no seu perfil ({dados.get('objetivo', 'Planejamento')}):
+    
+    🎯 Crédito: R$ {valor:,.2f}
+    ⏳ Prazo: {prazo} meses
+    
+    📉 *No Consórcio:* R$ {parcela_cons:,.2f}/mês
+    📈 *No Financiamento:* ~R$ {parcela_banco:,.2f}/mês
+    
+    💰 *Economia estimada:* R$ {economia:,.2f}
+    
+    Considerando seu lance/FGTS ({dados.get('lance', 'Sem lance')}), podemos tentar uma contemplação acelerada.
+    
+    Faz sentido reservar essa carta agora?
     """
 
-# --- CÉREBRO V58 (O EQUILÍBRIO) ---
-SYSTEM_PROMPT = f"""
-IDENTIDADE: Roberto, Consultor Especialista da ConsegSeguro.
-TOM DE VOZ: Profissional, Seguro, Empático e Resolutivo.
-OBJETIVO: Guiar o cliente para a melhor decisão financeira (Consórcio).
-
-DIRETRIZES DE COMPORTAMENTO:
-1. **Calor Humano:** Você DEVE ser educado. Pergunte "Tudo bem?", mencione a família se o cliente citar. O seguro é sobre cuidar de pessoas.
-2. **Sem Enrolação:** Após o cumprimento, vá DIRETO ao ponto. Não fique rodando.
-3. **Foco na Solução:** Se o cliente tem uma dor (ex: juros altos, quer casar, quer trocar de carro), apresente o consórcio como o REMÉDIO.
-4. **Postura de Autoridade:** Você não é um atendente, é um consultor. Você conduz a conversa.
-
-FLUXO DA CONVERSA:
-- Cliente falou "Oi"? -> Responda cordial e pergunte o objetivo (Imóvel, Carro, Investimento).
-- Cliente falou Valor? -> APRESENTE A SIMULAÇÃO (O sistema vai te dar os números). Mostre a economia brutal comparado ao financiamento.
-- Cliente gostou? -> Pergunte: "Esse valor fica confortável para você?" ou sugira o agendamento para detalhes finais.
-
-LINK DA AGENDA: {LINK_AGENDA}
-(Use apenas para fechamento ou dúvidas complexas).
-"""
+SYSTEM_PROMPTS_POR_FASE = {
+    0: "Se apresente como Roberto da ConsegSeguro. Pergunte se a pessoa tem interesse em Imóveis ou Veículos hoje.",
+    1: "O cliente quer comprar algo. Pergunte QUAL TIPO de bem (Imóvel, Carro, Caminhão)? Seja breve.",
+    2: "Ok, sabemos o tipo. Pergunte QUAL O VALOR do crédito que ele precisa. (Ex: 300 mil, 50 mil).",
+    3: "Sabemos o valor. Agora pergunte QUAL O VALOR DA PARCELA que fica confortável no bolso dele mensalmente.",
+    4: "Pergunte se ele possui algum valor para LANCE ou, no caso de imóveis, se tem saldo de FGTS.",
+    5: "Última pergunta: O objetivo é contemplação rápida (tem pressa) ou investimento de médio prazo?",
+    6: "Apenas apresente a simulação abaixo. Não pergunte mais nada, chame para o fechamento."
+}
 
 def responder_chat_inteligente(phone, msg_usuario, nome_cliente):
-    # 1. Verifica se tem número para calcular
-    valor_detectado = extrair_valor(msg_usuario)
-    contexto_extra = ""
+    conn = get_db_connection()
+    cur = conn.cursor()
     
-    if valor_detectado > 0:
-        tipo = "veiculo" if any(x in msg_usuario.lower() for x in ['carro','moto','veic']) else "imovel"
-        contexto_extra = calcular_simulacao(valor_detectado, tipo)
+    # 1. Pega Estado Atual
+    cur.execute("SELECT funnel_stage, dados_extra FROM leads WHERE phone = %s", (phone,))
+    res = cur.fetchone()
+    if not res: 
+        estagio = 0
+        dados_db = "{}"
+    else:
+        estagio = res[0] if res[0] is not None else 0
+        dados_db = res[1] if res[1] else "{}"
+
+    # 2. Analisa se avança de fase
+    novo_estagio, novos_dados = extrair_dados_ia(msg_usuario, estagio, dados_db)
     
-    # 2. Chama a IA
+    # 3. Atualiza Banco
+    novos_dados_str = json.dumps(novos_dados)
+    cur.execute("UPDATE leads SET funnel_stage = %s, dados_extra = %s WHERE phone = %s", 
+                (novo_estagio, novos_dados_str, phone))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    # 4. Gera Resposta baseada na FASE
     try:
         model = genai.GenerativeModel('gemini-2.0-flash')
         history = ler_historico(phone)
         chat = model.start_chat(history=history)
         
-        prompt_final = f"{SYSTEM_PROMPT}\n{contexto_extra}\nCliente ({nome_cliente}): {msg_usuario}\nRoberto:"
+        instrucao_fase = SYSTEM_PROMPTS_POR_FASE.get(novo_estagio, "Ajude o cliente.")
+        
+        simulacao_txt = ""
+        if novo_estagio == 6:
+            simulacao_txt = gerar_simulacao_final(novos_dados)
+        
+        prompt_final = f"""
+        IDENTIDADE: Roberto, Consultor Sênior ConsegSeguro.
+        FASE ATUAL DO ATENDIMENTO: {novo_estagio}/6
+        
+        DADOS COLETADOS: {novos_dados_str}
+        
+        SUA MISSÃO AGORA: {instrucao_fase}
+        
+        {simulacao_txt}
+        
+        REGRAS:
+        - Siga estritamente a missão da fase.
+        - Não pule etapas.
+        - Seja profissional e empático.
+        - Se o cliente tiver dúvida, responda a dúvida e repita a pergunta da fase.
+        """
         
         response = chat.send_message(prompt_final)
         texto_resp = response.text.strip()
         
         salvar_msg(phone, "model", texto_resp, nome_cliente)
         enviar_zap(phone, texto_resp)
+        
     except Exception as e:
         print(f"Erro IA: {e}")
 
-# --- PROCESSAMENTO DE ÁUDIO (V56 Integrada) ---
+# --- PROCESSAMENTO DE ÁUDIO ---
 def processar_audio(phone, audio_url, nome_cliente):
-    # Baixa e envia para IA (Código resumido para caber, mas funcional via prompt textual se URL for publica)
-    # Em produção, ideal é baixar o binário. Aqui simulamos o fluxo chamando a IA para avisar que ouviu.
-    responder_chat_inteligente(phone, " [ÁUDIO DO CLIENTE: O cliente enviou um áudio. Responda pedindo gentilmente para ele resumir em texto ou número pois sua audição está atualizando, mas mantenha a empatia] ", nome_cliente)
+    # Passa o áudio como texto simulado para o motor de funil processar
+    responder_chat_inteligente(phone, "[O cliente enviou um áudio. Ouça e extraia a informação da fase atual]", nome_cliente)
 
 # --- ROTAS ---
 @app.route('/webhook/whatsapp', methods=['POST'])
@@ -198,12 +280,12 @@ def whatsapp_hook():
                 phone = key.get('remoteJid', '').split('@')[0]
                 name = data.get('pushName', 'Cliente')
                 
-                # Texto
                 if data.get('messageType') == 'conversation':
                     txt = data.get('message', {}).get('conversation')
                     if txt: threading.Thread(target=responder_chat_inteligente, args=(phone, txt, name)).start()
-                
-                # Áudio
+                elif data.get('messageType') == 'extendedTextMessage':
+                    txt = data.get('message', {}).get('extendedTextMessage',{}).get('text')
+                    if txt: threading.Thread(target=responder_chat_inteligente, args=(phone, txt, name)).start()
                 elif data.get('messageType') == 'audioMessage':
                      url = data.get('message', {}).get('audioMessage', {}).get('url')
                      if url: threading.Thread(target=processar_audio, args=(phone, url, name)).start()
@@ -217,28 +299,32 @@ def processar_aquecimento():
     cur = conn.cursor()
     cur.execute("SELECT phone, nome FROM leads WHERE status = 'FILA_AQUECIMENTO' LIMIT 20")
     lote = cur.fetchall()
-    conn.close()
     
-    if not lote: return jsonify({"msg": "Fila vazia"})
+    if not lote: 
+        conn.close()
+        return jsonify({"msg": "Fila vazia"})
 
     def worker(lista):
+        cx = get_db_connection()
+        cux = cx.cursor()
         for p, n in lista:
-            # Abordagem V58: Cordial mas provoca Ação
-            msg = f"Olá {n}, tudo bem? Aqui é o Roberto da ConsegSeguro. ☀️ O mercado de crédito está com ótimas oportunidades essa semana. Você ainda pensa em tirar aquele projeto do papel (Imóvel ou Veículo)?"
+            # Reseta o funil para 0 e manda mensagem inicial
+            msg = f"Olá {n}, tudo bem? Aqui é o Roberto da ConsegSeguro. ☀️ Estamos selecionando clientes para os novos grupos de crédito hoje. Você tem interesse em Imóvel ou Veículo?"
             enviar_zap(p, msg)
             salvar_msg(p, "model", msg, n)
             
-            cx = get_db_connection()
-            cx.cursor().execute("UPDATE leads SET status = 'ATIVO' WHERE phone = %s", (p,))
+            cux.execute("UPDATE leads SET status = 'ATIVO', funnel_stage = 1 WHERE phone = %s", (p,))
             cx.commit()
-            cx.close()
             time.sleep(random.randint(40, 80))
+        cux.close()
+        cx.close()
 
     threading.Thread(target=worker, args=(lote,)).start()
-    return jsonify({"status": "Lote V58 Iniciado"})
+    return jsonify({"status": "Lote V59 (Funil) Iniciado"})
 
 @app.route('/importar_leads', methods=['POST'])
 def importar_leads():
+    # Mantido igual
     lista = request.json
     c = 0
     conn = get_db_connection()
@@ -247,7 +333,8 @@ def importar_leads():
         try:
             p = "".join(filter(str.isdigit, str(l.get('phone'))))
             n = l.get('nome', 'Investidor')
-            cur.execute("INSERT INTO leads (phone, nome, status, last_interaction, origem) VALUES (%s, %s, 'FILA_AQUECIMENTO', NOW(), 'Base') ON CONFLICT (phone) DO NOTHING", (p, n))
+            # Reinicia leads importados na etapa 0
+            cur.execute("INSERT INTO leads (phone, nome, status, last_interaction, origem, funnel_stage) VALUES (%s, %s, 'FILA_AQUECIMENTO', NOW(), 'Base', 0) ON CONFLICT (phone) DO UPDATE SET status='FILA_AQUECIMENTO', funnel_stage=0", (p, n))
             c += 1
         except: pass
     conn.commit()
@@ -255,7 +342,7 @@ def importar_leads():
     return jsonify({"qtd": c})
 
 @app.route('/', methods=['GET'])
-def health(): return jsonify({"status": "Roberto V58 - Equilíbrio Perfeito"}), 200
+def health(): return jsonify({"status": "Roberto V59 - Estrategista de Funil"}), 200
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
