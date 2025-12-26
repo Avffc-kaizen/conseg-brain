@@ -18,7 +18,7 @@ EVOLUTION_URL = os.getenv("EVOLUTION_URL")
 EVOLUTION_APIKEY = os.getenv("EVOLUTION_APIKEY")
 INSTANCE = os.getenv("INSTANCE_NAME", "consorcio")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") # Essencial para o áudio
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
 ANDRE_PESSOAL = "5561999949724"
 
@@ -61,57 +61,65 @@ def enviar_imagem(tel, image_url, legenda=""):
         time.sleep(2) 
     except: pass
 
-# --- TRANSCRIÇÃO DE ÁUDIO (WHISPER) ---
 def transcrever_audio_whisper(audio_url):
     try:
-        print(f"🎤 Baixando áudio: {audio_url}")
         audio_resp = requests.get(audio_url)
-        
-        # Salva temporariamente
-        filename = f"temp_audio_{int(time.time())}.ogg"
-        with open(filename, "wb") as f:
-            f.write(audio_resp.content)
-            
-        # Envia para OpenAI
-        with open(filename, "rb") as audio_file:
+        filename = f"temp_{int(time.time())}.ogg"
+        with open(filename, "wb") as f: f.write(audio_resp.content)
+        with open(filename, "rb") as af:
             headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
-            data = {"model": "whisper-1", "language": "pt"}
-            files = {"file": audio_file}
-            
-            response = requests.post("https://api.openai.com/v1/audio/transcriptions", headers=headers, files=files, data=data)
-        
-        os.remove(filename) # Limpa arquivo
-        
-        if response.status_code == 200:
-            texto = response.json().get("text", "")
-            print(f"📝 Transcrição: {texto}")
-            return texto
-        else:
-            print(f"❌ Erro OpenAI: {response.text}")
-            return ""
-    except Exception as e:
-        print(f"❌ Erro Transcrição: {e}")
-        return ""
+            res = requests.post("https://api.openai.com/v1/audio/transcriptions", headers=headers, files={"file": af}, data={"model": "whisper-1", "language": "pt"})
+        os.remove(filename)
+        return res.json().get("text", "")
+    except: return ""
 
-# --- CÉREBRO V1016 ---
+# --- CÉREBRO V1017 (ICP & FILTRO) ---
 def agente_redator(state):
     model = genai.GenerativeModel('gemini-2.0-flash')
     
-    prompt = f"""Você é ROBERTO, consultor da Conseg.
-    O cliente acabou de enviar esta mensagem: "{state['mensagem_original']}"
+    prompt = f"""Você é ROBERTO, o Assistente Digital da Conseg.
+    Sua função é filtrar e atender potenciais clientes para Consórcios de Alto Valor (Imóveis, Carros, Cirurgias).
 
-    --- REGRAS DE NEGÓCIO ---
-    1. SERVIÇOS (5k a 30k): Se o valor for baixo, assuma CONSÓRCIO DE SERVIÇOS (Cirurgia, Viagem, Reforma).
-       - Prazo: 36 a 48 meses.
-    2. CARROS (30k a 100k): Prazo 80 meses.
-    3. IMÓVEIS (+100k): Prazo 180 meses.
-    4. EMPRÉSTIMO: Se pedirem empréstimo, explique que Consórcio é planejamento sem juros.
+    --- 🚨 ANÁLISE DE PERFIL (ICP - LEIA COM ATENÇÃO) 🚨 ---
+    Antes de responder, analise se o cliente é qualificado:
+    
+    1. ❌ DESQUALIFICADO (Crianças/Jogos/Futilidades):
+       - Se pedir: Free Fire, Robux, Skins, Diamantes, Doces, Brinquedos ou coisas de baixo valor (< 5k).
+       - Se parecer uma criança brincando.
+       - AÇÃO: "Entendo. No momento, a Conseg trabalha apenas com consórcios para Veículos, Imóveis e Serviços de alto valor (acima de 30 mil). Agradeço o contato!" -> E PARE DE FALAR.
 
-    --- SE FOR ÁUDIO ---
-    O texto acima é a transcrição do áudio do cliente. Responda com naturalidade, como se tivesse ouvido.
-    "Ouvi seu áudio aqui..." ou "Entendi o que você disse sobre..."
+    2. ❌ DESQUALIFICADO (Agressivo/Sem Interesse):
+       - Se disser: "Não te conheço", "Sai daqui", "Quem é tu", "Para de mandar mensagem".
+       - AÇÃO: "Peço desculpas pelo incômodo. Vou retirar seu contato da nossa lista. Tenha um bom dia." -> E PARE DE FALAR.
 
+    3. ✅ QUALIFICADO (Adulto/Interesse Real):
+       - Busca Carro, Casa, Reforma, Cirurgia, Viagem.
+       - Faz perguntas sobre taxas, prazos ou funcionamento.
+       - AÇÃO: Siga o roteiro de vendas abaixo.
+
+    --- ROTEIRO DE VENDAS (Só para Qualificados) ---
+    - Identidade: Se perguntarem, diga "Sou o assistente digital da Conseg, estou aqui para agilizar seu atendimento."
+    - Anti-Papagaio: NUNCA diga "Entendi o que você disse sobre [texto do cliente]". Use variações: "Compreendo", "Certo", "Entendi".
+    - Regra de Valores:
+      * Carro: Mínimo 30k (80 meses).
+      * Imóvel: Mínimo 100k (180 meses).
+      * Serviços: 15k a 30k (Cirurgia/Reforma) - 36 a 48 meses.
+    
+    --- FORMATO DA PROPOSTA (Só se pedir valor > 15k) ---
+    [Nome], para [Categoria], tenho esta condição:
+
+    📋 *SIMULAÇÃO CONSEG*
+    🎯 *Crédito:* R$ [Valor]
+    ⏳ *Prazo:* [Meses] meses
+    📉 *Parcela:* R$ [Cálculo: (Valor/Prazo)*1.22]
+    
+    👉 *Oficialize aqui:* https://consorcio.consegseguro.com/app
+
+    Faz sentido pra você?
+    --------------------------------
+    
     HISTÓRICO: {state['historico']}
+    MENSAGEM ATUAL: "{state['mensagem_original']}"
     """
     
     response = model.generate_content(prompt)
@@ -122,62 +130,38 @@ def agente_redator(state):
 def executar_roberto(phone, msg, nome, audio_url=None):
     phone_clean = ''.join(filter(str.isdigit, str(phone)))
 
-    # 1. BLOCO DE COMANDO DE CHEFE (PRIORIDADE MÁXIMA - SEM IA)
     if phone_clean == ANDRE_PESSOAL and "/relatorio" in msg.lower():
-        try:
-            conn = get_db_connection(); cur = conn.cursor()
-            cur.execute("SELECT COUNT(DISTINCT phone) FROM episode_memory")
-            total = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM episode_memory WHERE timestamp >= CURRENT_DATE")
-            hoje = cur.fetchone()[0]
-            conn.close()
-            
-            relatorio = (f"📊 *STATUS V1016*\n"
-                         f"✅ Base Total: {total}\n"
-                         f"🗣️ Interações Hoje: {hoje}\n"
-                         f"🎧 Módulo de Áudio: Ativo")
-            enviar_zap(ANDRE_PESSOAL, relatorio)
-            return
-        except: 
-            enviar_zap(ANDRE_PESSOAL, "Erro ao puxar dados do banco.")
-            return
+        enviar_zap(ANDRE_PESSOAL, "📊 V1017: Filtro ICP e Identidade Digital Ativos.")
+        return
 
-    # 2. PROCESSAMENTO DE ÁUDIO
-    texto_final = msg
+    # Processa Áudio
+    texto_input = msg
     if audio_url:
         transcricao = transcrever_audio_whisper(audio_url)
-        if transcricao:
-            texto_final = f"[ÁUDIO DO CLIENTE]: {transcricao}"
-            # Avisa que está ouvindo (Opcional)
-            requests.post(f"{EVOLUTION_URL}/chat/chatPresence/{INSTANCE}", 
-                          json={"number": phone_clean, "presence": "recording"}, 
-                          headers={"apikey": EVOLUTION_APIKEY})
-        else:
-            enviar_zap(phone_clean, "Tive um problema para ouvir seu áudio. Pode escrever?")
-            return
+        if transcricao: texto_input = f"[Áudio]: {transcricao}"
+        else: return # Ignora áudio ruim
 
-    # 3. INTELIGÊNCIA
     try:
         conn = get_db_connection(); cur = conn.cursor()
         cur.execute("SELECT key_fact FROM episode_memory WHERE phone = %s ORDER BY timestamp DESC LIMIT 6", (phone_clean,))
         rows = cur.fetchall()
         hist = " | ".join([r[0] for r in rows[::-1]])
         
-        res = agente_redator({"nome": nome, "historico": hist, "mensagem_original": texto_final, "resposta_final": ""})
-        resposta_ia = res['resposta_final']
+        # O robô decide se responde ou corta
+        res = agente_redator({"nome": nome, "historico": hist, "mensagem_original": texto_input, "resposta_final": ""})
+        resposta = res['resposta_final']
 
-        if "SIMULAÇÃO" in resposta_ia:
+        # Envia imagem somente se for proposta real
+        if "SIMULAÇÃO" in resposta and "Free Fire" not in hist:
             enviar_imagem(phone_clean, BANNER_DOSSIE)
         
-        enviar_zap(phone_clean, resposta_ia)
+        enviar_zap(phone_clean, resposta)
 
-        # Salva
-        cur.execute("INSERT INTO episode_memory (phone, key_fact) VALUES (%s, %s)", (phone_clean, f"Cliente: {texto_final}"))
-        cur.execute("INSERT INTO episode_memory (phone, key_fact) VALUES (%s, %s)", (phone_clean, f"Roberto: {resposta_ia}"))
+        cur.execute("INSERT INTO episode_memory (phone, key_fact) VALUES (%s, %s)", (phone_clean, f"Cliente: {texto_input}"))
+        cur.execute("INSERT INTO episode_memory (phone, key_fact) VALUES (%s, %s)", (phone_clean, f"Roberto: {resposta}"))
         conn.commit(); conn.close()
     except Exception as e: print(f"Erro: {e}")
 
-# --- WEBHOOKS ---
 @app.route('/webhook/ads', methods=['POST'])
 def webhook_ads():
     try:
@@ -189,8 +173,9 @@ def webhook_ads():
         def iniciar():
             enviar_imagem(phone, BANNER_BOAS_VINDAS)
             time.sleep(3)
-            msg = (f"Olá {nome}, tudo bem? Sou Roberto da Conseg. 👋\n\n"
-                   f"Recebi seu cadastro. Para eu te ajudar: seu foco é **Carro**, **Imóvel** ou **Serviços** (Cirurgia/Reforma)?")
+            # Nova Abordagem Transparente
+            msg = (f"Olá {nome}, tudo bem? Aqui é o Roberto, assistente digital da Conseg. 🤖\n\n"
+                   f"Recebi seu cadastro de interesse. Para eu direcionar seu atendimento: você busca **Carro**, **Imóvel** ou **Serviços** (Reforma/Cirurgia)?")
             enviar_zap(phone, msg)
             
             conn = get_db_connection(); cur = conn.cursor()
@@ -208,18 +193,15 @@ def whatsapp_hook():
         phone = data.get('key', {}).get('remoteJid', '').split('@')[0]
         name = data.get('pushName', 'Cliente')
         msg = data.get('message', {})
-        
-        # Extração de Texto ou Áudio
         txt = msg.get('conversation') or msg.get('extendedTextMessage',{}).get('text')
-        audio_url = msg.get('audioMessage', {}).get('url') or msg.get('voiceMessage', {}).get('url') # Suporte a Voice Message
+        audio = msg.get('audioMessage', {}).get('url') or msg.get('voiceMessage', {}).get('url')
         
-        if txt or audio_url:
-            threading.Thread(target=executar_roberto, args=(phone, txt, name, audio_url)).start()
-            
+        if txt or audio:
+            threading.Thread(target=executar_roberto, args=(phone, txt, name, audio)).start()
     return jsonify({"status": "ok"}), 200
 
 @app.route('/')
-def home(): return "Roberto V1016 - Ouvindo Tudo", 200
+def home(): return "Roberto V1017 - ICP Filter Active", 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
