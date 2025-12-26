@@ -38,8 +38,9 @@ def enviar_zap(tel, txt):
         tel_clean = ''.join(filter(str.isdigit, str(tel)))
         if not tel_clean.startswith('55'): tel_clean = '55' + tel_clean
         
-        tempo_digitacao = min(len(txt) / 15, 5) 
-        time.sleep(random.randint(2, 4))
+        # Delay maior para evitar spam
+        tempo_digitacao = min(len(txt) / 10, 8) 
+        time.sleep(random.randint(3, 6))
         
         requests.post(f"{EVOLUTION_URL}/chat/chatPresence/{INSTANCE}", 
                       json={"number": tel_clean, "presence": "composing"}, 
@@ -73,51 +74,31 @@ def transcrever_audio_whisper(audio_url):
         return res.json().get("text", "")
     except: return ""
 
-# --- CÉREBRO V1017 (ICP & FILTRO) ---
+# --- CÉREBRO V1018 (ANTI-KIDS & AQUECIMENTO) ---
 def agente_redator(state):
     model = genai.GenerativeModel('gemini-2.0-flash')
     
-    prompt = f"""Você é ROBERTO, o Assistente Digital da Conseg.
-    Sua função é filtrar e atender potenciais clientes para Consórcios de Alto Valor (Imóveis, Carros, Cirurgias).
-
-    --- 🚨 ANÁLISE DE PERFIL (ICP - LEIA COM ATENÇÃO) 🚨 ---
-    Antes de responder, analise se o cliente é qualificado:
+    prompt = f"""Você é ROBERTO, Assistente Digital da Conseg.
     
-    1. ❌ DESQUALIFICADO (Crianças/Jogos/Futilidades):
-       - Se pedir: Free Fire, Robux, Skins, Diamantes, Doces, Brinquedos ou coisas de baixo valor (< 5k).
-       - Se parecer uma criança brincando.
-       - AÇÃO: "Entendo. No momento, a Conseg trabalha apenas com consórcios para Veículos, Imóveis e Serviços de alto valor (acima de 30 mil). Agradeço o contato!" -> E PARE DE FALAR.
+    --- 🚨 PROTOCOLO DE SEGURANÇA (ANTI-BLOQUEIO) 🚨 ---
+    1. ZERO REPETIÇÃO: NUNCA comece sua frase com "Entendi o que você disse sobre..." ou repetindo o texto do cliente. ISSO É PROIBIDO.
+    2. FILTRO DE CRIANÇAS/JOGOS (CRÍTICO):
+       - Se o texto contiver: "Free Fire", "Diamante", "Skin", "Robux", "Jogo", "PlayStation", "Brinquedo".
+       - AÇÃO IMEDIATA: Responda APENAS: "No momento trabalhamos apenas com consórcios para Veículos e Imóveis. Agradeço o contato!"
+       - NÃO OFEREÇA consórcio de serviços para jogos. Encerrar o papo.
 
-    2. ❌ DESQUALIFICADO (Agressivo/Sem Interesse):
-       - Se disser: "Não te conheço", "Sai daqui", "Quem é tu", "Para de mandar mensagem".
-       - AÇÃO: "Peço desculpas pelo incômodo. Vou retirar seu contato da nossa lista. Tenha um bom dia." -> E PARE DE FALAR.
-
-    3. ✅ QUALIFICADO (Adulto/Interesse Real):
-       - Busca Carro, Casa, Reforma, Cirurgia, Viagem.
-       - Faz perguntas sobre taxas, prazos ou funcionamento.
-       - AÇÃO: Siga o roteiro de vendas abaixo.
-
-    --- ROTEIRO DE VENDAS (Só para Qualificados) ---
-    - Identidade: Se perguntarem, diga "Sou o assistente digital da Conseg, estou aqui para agilizar seu atendimento."
-    - Anti-Papagaio: NUNCA diga "Entendi o que você disse sobre [texto do cliente]". Use variações: "Compreendo", "Certo", "Entendi".
-    - Regra de Valores:
-      * Carro: Mínimo 30k (80 meses).
-      * Imóvel: Mínimo 100k (180 meses).
-      * Serviços: 15k a 30k (Cirurgia/Reforma) - 36 a 48 meses.
+    --- QUALIFICAÇÃO REAL ---
+    - Se for adulto buscando Carro, Casa ou Cirurgia/Reforma:
+    - Apresente-se brevemente e pergunte o valor.
+    - Se o valor for < 30k e não for serviço, explique o mínimo de 30k.
     
-    --- FORMATO DA PROPOSTA (Só se pedir valor > 15k) ---
-    [Nome], para [Categoria], tenho esta condição:
+    --- ROTEIRO ---
+    Cliente: "Quero diamantes pro free fire"
+    Roberto: "No momento trabalhamos apenas com consórcios para Veículos e Imóveis. Agradeço o contato!" (FIM).
 
-    📋 *SIMULAÇÃO CONSEG*
-    🎯 *Crédito:* R$ [Valor]
-    ⏳ *Prazo:* [Meses] meses
-    📉 *Parcela:* R$ [Cálculo: (Valor/Prazo)*1.22]
-    
-    👉 *Oficialize aqui:* https://consorcio.consegseguro.com/app
+    Cliente: "Quero um carro"
+    Roberto: "Opa, maravilha. Já tem ideia de qual modelo ou valor você busca?"
 
-    Faz sentido pra você?
-    --------------------------------
-    
     HISTÓRICO: {state['historico']}
     MENSAGEM ATUAL: "{state['mensagem_original']}"
     """
@@ -131,7 +112,7 @@ def executar_roberto(phone, msg, nome, audio_url=None):
     phone_clean = ''.join(filter(str.isdigit, str(phone)))
 
     if phone_clean == ANDRE_PESSOAL and "/relatorio" in msg.lower():
-        enviar_zap(ANDRE_PESSOAL, "📊 V1017: Filtro ICP e Identidade Digital Ativos.")
+        enviar_zap(ANDRE_PESSOAL, "📊 V1018: Protocolo Anti-Kids Ativo.")
         return
 
     # Processa Áudio
@@ -139,7 +120,7 @@ def executar_roberto(phone, msg, nome, audio_url=None):
     if audio_url:
         transcricao = transcrever_audio_whisper(audio_url)
         if transcricao: texto_input = f"[Áudio]: {transcricao}"
-        else: return # Ignora áudio ruim
+        else: return
 
     try:
         conn = get_db_connection(); cur = conn.cursor()
@@ -147,12 +128,12 @@ def executar_roberto(phone, msg, nome, audio_url=None):
         rows = cur.fetchall()
         hist = " | ".join([r[0] for r in rows[::-1]])
         
-        # O robô decide se responde ou corta
+        # Inteligência
         res = agente_redator({"nome": nome, "historico": hist, "mensagem_original": texto_input, "resposta_final": ""})
         resposta = res['resposta_final']
 
-        # Envia imagem somente se for proposta real
-        if "SIMULAÇÃO" in resposta and "Free Fire" not in hist:
+        # Envia imagem SÓ se for simulação real e NÃO for rejeição
+        if "SIMULAÇÃO" in resposta and "agradeço o contato" not in resposta.lower():
             enviar_imagem(phone_clean, BANNER_DOSSIE)
         
         enviar_zap(phone_clean, resposta)
@@ -171,11 +152,12 @@ def webhook_ads():
         nome = (dados.get('name') or "Parceiro").split(' ')[0]
 
         def iniciar():
-            enviar_imagem(phone, BANNER_BOAS_VINDAS)
-            time.sleep(3)
-            # Nova Abordagem Transparente
-            msg = (f"Olá {nome}, tudo bem? Aqui é o Roberto, assistente digital da Conseg. 🤖\n\n"
-                   f"Recebi seu cadastro de interesse. Para eu direcionar seu atendimento: você busca **Carro**, **Imóvel** ou **Serviços** (Reforma/Cirurgia)?")
+            # AQUECIMENTO: NÃO MANDA IMAGEM AGORA. SÓ TEXTO CURTO.
+            # Isso evita que o WhatsApp marque como spam visual massivo.
+            msg = f"Olá {nome}, tudo bem?"
+            
+            # Manda só o "Oi" e espera.
+            # O resto o Roberto assume quando o cliente responder.
             enviar_zap(phone, msg)
             
             conn = get_db_connection(); cur = conn.cursor()
@@ -201,7 +183,7 @@ def whatsapp_hook():
     return jsonify({"status": "ok"}), 200
 
 @app.route('/')
-def home(): return "Roberto V1017 - ICP Filter Active", 200
+def home(): return "Roberto V1018 - Modo Aquecimento", 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
