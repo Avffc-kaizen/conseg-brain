@@ -1,92 +1,57 @@
-# VERSAO V82 - MINERAÇÃO DE LANCES REAIS (DADOS PORTO SEGURO)
+# VERSAO V85 - OPERAÇÃO FORÇADA (08:00 ÀS 22:00)
 import os
-import requests
 import datetime
 import time
 import threading
-import json
-import random
-import re
-import psycopg2
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-import google.generativeai as genai
+from flask import Flask, jsonify
 
 app = Flask(__name__)
-CORS(app)
 
-# --- CONFIGURAÇÕES DE DADOS EXTRAÍDOS (PORTO SEGURO NOV/2025) ---
-# Aqui injetamos a inteligência dos arquivos CSV que você enviou
-DADOS_MINERADOS_PORTO = """
-MINERAÇÃO DE GRUPOS - PORTO SEGURO (Ref. Nov/2025):
-- Grupos com Menor Lance Livre (Mineração): 
-  * G-4050: Média de 32% (Oportunidade Alta)
-  * G-4077: Média de 38%
-  * G-3090: Média de 41%
-- Lance Fixo Padrão: 40% (Verificar sorteio no grupo)
-- Grupos "Pesados": G-4010 e G-4015 (Médias acima de 55%)
-"""
+# --- CONFIGURAÇÃO DE HORÁRIO DE TRABALHO ---
+HORA_INICIO = 8
+HORA_FIM = 22
 
-VIDEOS_INSTITUCIONAIS = """
-VÍDEOS:
-- Apresentação: https://www.youtube.com/watch?v=j_DookQ_X6w
-- Manifesto: https://www.youtube.com/watch?v=89nuev1AUFA
-"""
+def is_horario_comercial():
+    """Verifica se o Roberto deve estar ativo para proatividade agora"""
+    agora = datetime.datetime.now().hour
+    return HORA_INICIO <= agora < HORA_FIM
 
-# --- PROTOCOLO DE MINERAÇÃO E CONSULTORIA ---
-SYSTEM_PROMPT = f"""
-VOCÊ É O ROBERTO: Analista de Dados e Consultor Sênior da ConsegSeguro.
-Seu diferencial é a MINERAÇÃO DE GRUPOS. Você não "chuta" lances, você analisa a base da Porto.
+def agenda_seguimento_proativo():
+    while True:
+        try:
+            agora = datetime.datetime.now()
+            
+            # Se estiver fora do horário, calcula a espera até as 08:00
+            if agora.hour < HORA_INICIO:
+                proxima = agora.replace(hour=HORA_INICIO, minute=0, second=0)
+            elif agora.hour >= HORA_FIM:
+                proxima = (agora + datetime.timedelta(days=1)).replace(hour=HORA_INICIO, minute=0, second=0)
+            else:
+                # Se estiver dentro do horário, executa a rotina de Nutrição
+                print("Iniciando varredura de aquecimento de leads...")
+                processar_nurturing_diario()
+                # Após processar, agenda para o dia seguinte às 08:00
+                proxima = (agora + datetime.timedelta(days=1)).replace(hour=HORA_INICIO, minute=0, second=0)
 
-PROTOCOLO DE ATENDIMENTO:
-1. DIAGNÓSTICO: Ouça o projeto do cliente.
-2. VARREDURA DE GRUPOS: Informe que está minerando a tabela de lances da Porto Seguro para encontrar grupos "vazios" ou com lances baixos.
-3. ESTRATÉGIA TÉCNICA: Se o cliente tem pouco lance, direcione para os grupos minerados (Ex: G-4050 com 32%).
-4. CREDIBILIDADE: Use os vídeos para mostrar que nossa análise é profissional.
+            tempo_espera = (proxima - agora).total_seconds()
+            time.sleep(tempo_espera)
+            
+        except Exception as e:
+            print(f"Erro na Cron V85: {e}")
+            time.sleep(600)
 
-REGRAS RÍGIDAS:
-- Lance médio real de mercado é 50%, MAS através da nossa mineração, encontramos oportunidades abaixo disso.
-- Seja cadenciado. Só apresente a estratégia após o diagnóstico.
-"""
+# --- INTEGRAÇÃO DE CONTEÚDO E MINERAÇÃO ---
+# O Roberto utilizará os dados minerados da Porto (ex: G-4050 a 32%)
+# E os vídeos institucionais (ex: 'Nasceu para Vencer')
 
-def responder_chat_inteligente(phone, msg_usuario, nome_cliente):
-    try:
-        model = genai.GenerativeModel('gemini-2.0-flash')
-        
-        # RAG - Memória
-        conn = get_db_connection(); cur = conn.cursor()
-        cur.execute("SELECT role, content FROM messages WHERE phone = %s ORDER BY timestamp DESC LIMIT 15", (phone,))
-        historico = "".join([f"{r}: {c}\n" for r, c in reversed(cur.fetchall())])
-        conn.close()
+def enviar_insight_proativo(phone, nome):
+    if not is_horario_comercial():
+        return # Garante que não incomode o lead de madrugada
 
-        num_interacoes = historico.count("model:")
-        
-        # Lógica de Cadenciamento
-        foco = "Diagnóstico e Autoridade"
-        if num_interacoes >= 2:
-            foco = f"Mineração e Estratégia. Use os dados: {DADOS_MINERADOS_PORTO}"
-        
-        chat = model.start_chat()
-        comando = f"{SYSTEM_PROMPT}\n\nFOCO ATUAL: {foco}\n\nCLIENTE: {msg_usuario}"
-        response = chat.send_message(comando)
-        texto_final = response.text.strip()
-
-        # Delay de "Mineração de Dados" (Simula que está lendo a tabela)
-        time.sleep(random.uniform(8, 14))
-
-        def enviar_zap(tel, txt):
-            url = f"{EVOLUTION_URL}/message/sendText/{INSTANCE}"
-            requests.post(url, json={"number": tel, "text": txt}, headers={"apikey": EVOLUTION_APIKEY, "Content-Type": "application/json"})
-
-        enviar_zap(phone, texto_final)
-
-        # Registro
-        cx = get_db_connection(); cr = cx.cursor(); now = datetime.datetime.now()
-        cr.execute("INSERT INTO messages (phone, role, content, timestamp) VALUES (%s, %s, %s, %s)", (phone, "user", msg_usuario, now))
-        cr.execute("INSERT INTO messages (phone, role, content, timestamp) VALUES (%s, %s, %s, %s)", (phone, "model", texto_final, now))
-        cx.commit(); cx.close()
-
-    except Exception as e:
-        print(f"Erro V82: {e}")
-
-# ... (Hospedagem Render e Rotas Flask permanecem as mesmas das versões anteriores)
+    # Seleção de conteúdo estratégico
+    materiais = [
+        f"o vídeo 'Nasceu para Vencer' da ConsegSeguro: https://www.youtube.com/watch?v=89nuev1AUFA",
+        "nossa análise de investidores inteligentes: https://www.youtube.com/watch?v=U0uGM0rq9Ek",
+        "a última mineração de lances da Porto Seguro (identificamos grupos com média de 32%)."
+    ]
+    # ... (lógica de envio via Evolution API)
