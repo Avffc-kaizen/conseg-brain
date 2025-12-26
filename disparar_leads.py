@@ -11,7 +11,7 @@ def continuar_prospeccao():
     df = pd.read_csv(CSV_FILE)
     
     # SALTA OS PRIMEIROS 20 LEADS (iloc[20:])
-    leads_restantes = df.iloc[20:]
+    leads_restantes = df.iloc[23:]
     
     print(f"🚀 Retomando prospecção a partir do lead 21...")
     print(f"📈 Faltam {len(leads_restantes)} leads para processar.")
