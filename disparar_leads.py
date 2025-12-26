@@ -7,12 +7,16 @@ import random
 WEBHOOK_ADS_URL = "https://conseg-brain.onrender.com/webhook/ads"
 CSV_FILE = "Relatório de formulário de lead (2).csv"
 
-def iniciar_prospeccao():
+def continuar_prospeccao():
     df = pd.read_csv(CSV_FILE)
-    print(f"🚀 Iniciando prospecção de {len(df)} leads...")
+    
+    # SALTA OS PRIMEIROS 20 LEADS (iloc[20:])
+    leads_restantes = df.iloc[20:]
+    
+    print(f"🚀 Retomando prospecção a partir do lead 21...")
+    print(f"📈 Faltam {len(leads_restantes)} leads para processar.")
 
-    for index, row in df.iterrows():
-        # Limpeza do Telefone
+    for index, row in leads_restantes.iterrows():
         phone = str(row['PHONE_NUMBER']).replace('.0', '').replace('+', '').strip()
         nome = f"{row['FIRST_NAME']} {row['LAST_NAME']}".strip()
         categoria = str(row.get('em_qual_categoria_você_tem_interesse?', 'Geral'))
@@ -20,26 +24,22 @@ def iniciar_prospeccao():
         payload = {
             "phone": phone,
             "name": nome,
-            "ad_name": f"Carga Terminal - {categoria}"
+            "ad_name": f"Carga Terminal V2 - {categoria}"
         }
 
         try:
-            # Envia para o Roberto processar
             response = requests.post(WEBHOOK_ADS_URL, json=payload)
-            
             if response.status_code == 200:
-                print(f"✅ Lead {index+1}/{len(df)}: {nome} ({phone}) enviado para o Roberto.")
+                print(f"✅ Lead {index + 1}: {nome} ({phone}) enviado.")
             else:
-                print(f"⚠️ Erro ao enviar {nome}: {response.text}")
-
+                print(f"⚠️ Erro no lead {nome}: {response.text}")
         except Exception as e:
-            print(f"❌ Falha de conexão: {e}")
+            print(f"❌ Falha: {e}")
 
-        # --- O SEGREDO DO DISPARO 1 A 1 ---
-        # Intervalo entre leads para aquecimento do chip (30 a 90 segundos)
-        delay = random.randint(30, 90)
-        print(f"⏳ Aguardando {delay} segundos para o próximo lead...")
+        # Intervalo Seguro: Entre 45 a 120 segundos
+        delay = random.randint(45, 120)
+        print(f"⏳ Próximo lead em {delay}s...")
         time.sleep(delay)
 
 if __name__ == "__main__":
-    iniciar_prospeccao()
+    continuar_prospeccao()
