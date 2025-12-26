@@ -15,14 +15,14 @@ from langgraph.graph import StateGraph, END
 app = Flask(__name__)
 CORS(app)
 
-# --- CONFIGURAÇÕES DE AMBIENTE ---
+# --- VARIÁVEIS DE AMBIENTE (Configuradas no Render) ---
 EVOLUTION_URL = os.getenv("EVOLUTION_URL")
 EVOLUTION_APIKEY = os.getenv("EVOLUTION_APIKEY")
 INSTANCE = os.getenv("INSTANCE_NAME", "consorcio")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
-ROBERTO_PHONE = "556195369057" 
+ROBERTO_PHONE = "556195369057" # Seu WhatsApp de alerta
 
 if GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
@@ -30,37 +30,41 @@ if GEMINI_KEY:
 def get_db_connection():
     return psycopg2.connect(DATABASE_URL)
 
-# --- MOTOR DE HUMANIZAÇÃO (BLINDAGEM DE CHIP) ---
+# --- SISTEMA DE HUMANIZAÇÃO E PROTEÇÃO DE CHIP (V1004/1005) ---
 def enviar_zap(tel, txt):
-    """Envia mensagens simulando comportamento humano (Leitura + Digitação)"""
+    """Envia mensagens simulando comportamento humano real"""
     try:
-        # 1. Simula o tempo de 'Leitura' da mensagem (3 a 6 segundos)
-        time.sleep(random.randint(3, 6))
+        # Garante telefone limpo (somente números)
+        tel_clean = ''.join(filter(str.isdigit, str(tel)))
+        if not tel_clean.startswith('55'): tel_clean = '55' + tel_clean
 
-        # 2. Envia sinal de 'Digitando' via Evolution API
+        # 1. Delay de Leitura (3 a 7 seg)
+        time.sleep(random.randint(3, 7))
+
+        # 2. Ativa "Digitando..." na API
         url_presence = f"{EVOLUTION_URL}/chat/chatPresence/{INSTANCE}"
         requests.post(url_presence, 
-                      json={"number": tel, "presence": "composing"}, 
+                      json={"number": tel_clean, "presence": "composing"}, 
                       headers={"apikey": EVOLUTION_APIKEY})
 
-        # 3. Tempo de digitação proporcional ao texto (máximo 10s)
-        typing_delay = min(len(txt) / 15, 10) 
-        time.sleep(typing_delay)
+        # 3. Delay de Digitação proporcional (15 caracteres por segundo)
+        typing_time = min(len(txt) / 15, 12)
+        time.sleep(typing_time)
 
-        # 4. Envio do texto final
+        # 4. Envio efetivo
         url_send = f"{EVOLUTION_URL}/message/sendText/{INSTANCE}"
-        payload = {"number": tel, "text": txt}
+        payload = {"number": tel_clean, "text": txt}
         res = requests.post(url_send, json=payload, headers={"apikey": EVOLUTION_APIKEY})
         
-        print(f"✅ Mensagem humanizada enviada para {tel}")
+        print(f"✅ Roberto respondeu para {tel_clean}")
         return res
     except Exception as e:
-        print(f"❌ Erro na humanização: {e}")
+        print(f"❌ Erro no envio humanizado: {e}")
 
-# --- MOTOR DE TRANSCRIÇÃO (WHISPER) ---
+# --- TRANSCRIÇÃO DE ÁUDIO (WHISPER) ---
 def transcrever_audio(audio_url):
     try:
-        response = requests.get(audio_url, timeout=15)
+        response = requests.get(audio_url, timeout=20)
         if response.status_code != 200: return ""
         files = {'file': ('audio.ogg', response.content, 'audio/ogg')}
         headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
@@ -68,10 +72,10 @@ def transcrever_audio(audio_url):
                             headers=headers, files=files, data={"model": "whisper-1", "language": "pt"})
         return res.json().get("text", "")
     except Exception as e:
-        print(f"Erro Whisper: {e}")
+        print(f"⚠️ Erro Whisper: {e}")
         return ""
 
-# --- ESTRUTURA AGÊNTICA (LANGGRAPH) ---
+# --- LÓGICA AGÊNTICA (LANGGRAPH) ---
 class AgentState(TypedDict):
     phone: str
     nome: str
@@ -81,18 +85,20 @@ class AgentState(TypedDict):
 
 def agente_redator(state: AgentState):
     model = genai.GenerativeModel('gemini-2.0-flash')
-    # PROMPT DO ARQUITETO ESTÓICO V1004
-    prompt = f"""Você é o ROBERTO, Arquiteto de Sonhos da Conseg. 
-    Perfil: Estóico, Minimalista e Altamente Profissional. 
-    
-    DIRETRIZES:
-    1. Nunca envie 'textões'. Seja breve e certeiro.
-    2. No primeiro contato, apenas valide o cliente e pergunte o objetivo (Imóvel ou Auto).
-    3. Use 'Silent Reading': Você sabe que o grupo G-4050 da Porto tem lances de 32%, mas não despeje isso sem o cliente pedir.
-    4. Se o cliente quiser simulação, direcione para: https://consorcio.consegseguro.com/app
-    
-    HISTÓRICO: {state['historico']}
-    CLIENTE: {state['nome']} diz: {state['mensagem_original']}
+    # PROMPT SUPREMO V1005 - ESTÓICO E COM MEMÓRIA TOTAL
+    prompt = f"""Você é o ROBERTO, Consultor Estratégico da Conseg.
+    Sua missão é ser um Arquiteto de Sonhos através do consórcio.
+
+    COMPORTAMENTO:
+    - Persona: Estóico, minimalista, educado e altamente profissional.
+    - Regra: Nunca mande mensagens longas (textões).
+    - Memória: Você tem acesso a todo o histórico abaixo. Se o cliente já disse algo antes, use isso a seu favor para não ser repetitivo.
+    - Call to Action: Para simulações detalhadas, direcione para: https://consorcio.consegseguro.com/app
+
+    HISTÓRICO COMPLETO DA CONVERSA (MEMÓRIA INFINITA):
+    {state['historico']}
+
+    CLIENTE {state['nome']} DIZ AGORA: {state['mensagem_original']}
     """
     response = model.generate_content(prompt)
     state['resposta_final'] = response.text.strip()
@@ -104,58 +110,86 @@ workflow.set_entry_point("redator")
 workflow.add_edge("redator", END)
 roberto_brain = workflow.compile()
 
-# --- EXECUÇÃO PRINCIPAL ---
+# --- FUNÇÃO CENTRAL DE EXECUÇÃO ---
 def executar_roberto(phone, msg, nome, audio_url=None):
     try:
-        texto = transcrever_audio(audio_url) if audio_url else msg
-        if not texto: return
+        phone_clean = ''.join(filter(str.isdigit, str(phone)))
+        
+        # 1. Transcrição se for áudio
+        texto_usuario = transcrever_audio(audio_url) if audio_url else msg
+        if not texto_usuario: return
 
-        # Memória Episódica
+        # 2. Busca Memória Infinita no Neon
         conn = get_db_connection(); cur = conn.cursor()
-        cur.execute("SELECT key_fact FROM episode_memory WHERE phone = %s ORDER BY timestamp DESC LIMIT 5", (phone,))
-        fatos = " ".join([f[0] for f in cur.fetchall()])
+        cur.execute("SELECT key_fact FROM episode_memory WHERE phone = %s ORDER BY timestamp ASC", (phone_clean,))
+        historico_completo = " | ".join([f[0] for f in cur.fetchall()])
         conn.close()
 
-        # Roda a Inteligência
+        # 3. Gera Resposta com Gemini 2.0
         resultado = roberto_brain.invoke({
-            "phone": phone, "nome": nome, "mensagem_original": texto, "historico": fatos, "resposta_final": ""
+            "phone": phone_clean, 
+            "nome": nome, 
+            "mensagem_original": texto_usuario, 
+            "historico": historico_completo, 
+            "resposta_final": ""
         })
         
-        # Envio Humanizado
-        enviar_zap(phone, resultado['resposta_final'])
+        # 4. Envio com Blindagem
+        enviar_zap(phone_clean, resultado['resposta_final'])
 
-        # Salva Fatos Relevantes
-        if len(texto) > 5:
-            conn = get_db_connection(); cur = conn.cursor()
-            cur.execute("INSERT INTO episode_memory (phone, key_fact) VALUES (%s, %s)", (phone, texto[:200]))
-            conn.commit(); conn.close()
+        # 5. Salva na Memória
+        conn = get_db_connection(); cur = conn.cursor()
+        cur.execute("INSERT INTO episode_memory (phone, key_fact) VALUES (%s, %s)", (phone_clean, texto_usuario))
+        conn.commit(); conn.close()
 
     except Exception as e:
-        print(f"Erro V1004: {e}")
+        print(f"❌ Falha crítica Roberto V1005: {e}")
 
-# --- WEBHOOKS ---
+# --- ROTAS (WEBHOOKS) ---
 @app.route('/webhook/whatsapp', methods=['POST'])
 def whatsapp_hook():
-    data = request.json.get('data', {})
-    if not data.get('key', {}).get('fromMe'):
-        phone = data.get('key', {}).get('remoteJid', '').split('@')[0]
-        name = data.get('pushName', 'Cliente')
-        msg = data.get('message', {})
-        audio_url = msg.get('audioMessage', {}).get('url') if 'audioMessage' in msg else None
-        txt = msg.get('conversation') or msg.get('extendedTextMessage',{}).get('text')
-        if txt or audio_url:
-            threading.Thread(target=executar_roberto, args=(phone, txt, name, audio_url)).start()
-    return jsonify({"status": "ok"}), 200
+    try:
+        data = request.json.get('data', {})
+        if not data.get('key', {}).get('fromMe'):
+            phone = data.get('key', {}).get('remoteJid', '').split('@')[0]
+            name = data.get('pushName', 'Cliente')
+            msg = data.get('message', {})
+            
+            audio_url = msg.get('audioMessage', {}).get('url') if 'audioMessage' in msg else None
+            txt = msg.get('conversation') or msg.get('extendedTextMessage',{}).get('text')
+            
+            if txt or audio_url:
+                threading.Thread(target=executar_roberto, args=(phone, txt, name, audio_url)).start()
+        return jsonify({"status": "ok"}), 200
+    except:
+        return jsonify({"status": "error"}), 500
 
 @app.route('/webhook/ads', methods=['POST'])
 def webhook_ads():
-    dados = request.json
-    phone, nome = dados.get('phone'), dados.get('name')
-    if phone and nome:
-        enviar_zap(ROBERTO_PHONE, f"🚀 Novo Lead via Ads: {nome} ({phone})")
-        threading.Thread(target=executar_roberto, args=(phone, "Iniciando contato via anúncio", nome)).start()
-        return jsonify({"status": "Lead recebido"}), 200
-    return jsonify({"error": "Dados inválidos"}), 400
+    try:
+        dados = request.get_json(force=True)
+        if isinstance(dados, list): dados = dados[0]
+            
+        phone = dados.get('phone') or dados.get('telefone')
+        nome = dados.get('name') or dados.get('nome') or "Lead"
+        
+        if not phone: return jsonify({"error": "Sem telefone"}), 400
+        phone_clean = ''.join(filter(str.isdigit, str(phone)))
+
+        # Alerta para o consultor
+        enviar_zap(ROBERTO_PHONE, f"🚀 NOVO LEAD ADS: {nome} ({phone_clean})")
+        
+        # Abordagem automática do Roberto
+        threading.Thread(target=executar_roberto, args=(phone_clean, f"Olá {nome}, vi seu interesse no consórcio da Conseg!", nome)).start()
+        
+        return jsonify({"status": "Lead processado"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/')
+def home():
+    return "Roberto V1005 (Conseg) Online - Memória Infinita Ativada", 200
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
