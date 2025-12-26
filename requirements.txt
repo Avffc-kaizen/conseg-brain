@@ -1,6 +1,10 @@
 flask
 flask-cors
 requests
-google-generativeai
-gunicorn
 psycopg2-binary
+google-generativeai
+langgraph
+langchain-google-genai
+langchain-core
+openai  # Necessário para o Whisper-1
+pydub   # Processamento de áudio
