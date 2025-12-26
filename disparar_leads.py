@@ -10,10 +10,10 @@ CSV_FILE = "Relatório de formulário de lead (2).csv"
 def continuar_prospeccao():
     df = pd.read_csv(CSV_FILE)
     
-    # SALTA OS PRIMEIROS 20 LEADS (iloc[20:])
-    leads_restantes = df.iloc[23:]
+    # SALTA OS PRIMEIROS 35 LEADS (iloc[35:])
+    leads_restantes = df.iloc[35:]
     
-    print(f"🚀 Retomando prospecção a partir do lead 21...")
+    print(f"🚀 Retomando prospecção a partir do lead 35...")
     print(f"📈 Faltam {len(leads_restantes)} leads para processar.")
 
     for index, row in leads_restantes.iterrows():
