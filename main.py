@@ -23,7 +23,6 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 ANDRE_PESSOAL = "5561999949724"
 
 # URLs
-BANNER_BOAS_VINDAS = "https://consegseguro.com.br/wp-content/uploads/2024/banner-investimento.jpg"
 BANNER_DOSSIE = "https://consegseguro.com.br/wp-content/uploads/2024/dossie-pronto.png" 
 
 if GEMINI_KEY:
@@ -38,9 +37,8 @@ def enviar_zap(tel, txt):
         tel_clean = ''.join(filter(str.isdigit, str(tel)))
         if not tel_clean.startswith('55'): tel_clean = '55' + tel_clean
         
-        # Delay maior para evitar spam
-        tempo_digitacao = min(len(txt) / 10, 8) 
-        time.sleep(random.randint(3, 6))
+        tempo_digitacao = min(len(txt) / 15, 5) 
+        time.sleep(random.randint(2, 4))
         
         requests.post(f"{EVOLUTION_URL}/chat/chatPresence/{INSTANCE}", 
                       json={"number": tel_clean, "presence": "composing"}, 
@@ -74,33 +72,37 @@ def transcrever_audio_whisper(audio_url):
         return res.json().get("text", "")
     except: return ""
 
-# --- CÉREBRO V1018 (ANTI-KIDS & AQUECIMENTO) ---
+# --- CÉREBRO V1019 (FAST TRACK - LEAD DO SITE) ---
 def agente_redator(state):
     model = genai.GenerativeModel('gemini-2.0-flash')
     
     prompt = f"""Você é ROBERTO, Assistente Digital da Conseg.
+
+    --- 🚨 DETECTOR DE LEAD DO SITE (CRÍTICO - LEIA ISTO) 🚨 ---
+    Analise o HISTÓRICO e a MENSAGEM ATUAL.
+    Se a mensagem contiver "DETALHES DA COTAÇÃO", "Vi a análise no site", ou dados técnicos como (Administradora, Valor da Carta, Parcela):
     
-    --- 🚨 PROTOCOLO DE SEGURANÇA (ANTI-BLOQUEIO) 🚨 ---
-    1. ZERO REPETIÇÃO: NUNCA comece sua frase com "Entendi o que você disse sobre..." ou repetindo o texto do cliente. ISSO É PROIBIDO.
-    2. FILTRO DE CRIANÇAS/JOGOS (CRÍTICO):
-       - Se o texto contiver: "Free Fire", "Diamante", "Skin", "Robux", "Jogo", "PlayStation", "Brinquedo".
-       - AÇÃO IMEDIATA: Responda APENAS: "No momento trabalhamos apenas com consórcios para Veículos e Imóveis. Agradeço o contato!"
-       - NÃO OFEREÇA consórcio de serviços para jogos. Encerrar o papo.
+    1. 🚫 PROIBIDO PERGUNTAR O ÓBVIO: 
+       - NÃO pergunte "Qual o valor?". (Está na mensagem!)
+       - NÃO pergunte "Qual o objetivo?". (Está na mensagem!)
+       - NÃO peça "Dados para simulação". (Já foi simulado!)
 
-    --- QUALIFICAÇÃO REAL ---
-    - Se for adulto buscando Carro, Casa ou Cirurgia/Reforma:
-    - Apresente-se brevemente e pergunte o valor.
-    - Se o valor for < 30k e não for serviço, explique o mínimo de 30k.
+    2. ✅ AÇÃO "FAST TRACK" (FECHAMENTO):
+       - Reconheça a proposta imediatamente: "Olá! Vi aqui sua simulação de [Valor] pela [Administradora]. Excelente escolha."
+       - Se o cliente disser "Quero contratar", "Como funciona", ou "O que precisa":
+         -> Vá direto para a DOCUMENTAÇÃO.
+         -> Responda: "Para garantirmos essa condição, preciso emitir seu contrato. Pode me enviar foto do seu RG (ou CNH) e um Comprovante de Residência?"
+
+    --- REGRAS GERAIS (Se NÃO for lead do site) ---
+    - Filtro Kids: Se falar de Free Fire/Jogos -> Encerre ("Não atendemos").
+    - Se for lead frio (apenas "Oi") -> Qualifique (Carro ou Imóvel?).
+    - Identidade: Você é o Roberto, consultor digital.
+
+    HISTÓRICO DA CONVERSA:
+    {state['historico']}
     
-    --- ROTEIRO ---
-    Cliente: "Quero diamantes pro free fire"
-    Roberto: "No momento trabalhamos apenas com consórcios para Veículos e Imóveis. Agradeço o contato!" (FIM).
-
-    Cliente: "Quero um carro"
-    Roberto: "Opa, maravilha. Já tem ideia de qual modelo ou valor você busca?"
-
-    HISTÓRICO: {state['historico']}
-    MENSAGEM ATUAL: "{state['mensagem_original']}"
+    MENSAGEM ATUAL DO CLIENTE:
+    "{state['mensagem_original']}"
     """
     
     response = model.generate_content(prompt)
@@ -112,7 +114,7 @@ def executar_roberto(phone, msg, nome, audio_url=None):
     phone_clean = ''.join(filter(str.isdigit, str(phone)))
 
     if phone_clean == ANDRE_PESSOAL and "/relatorio" in msg.lower():
-        enviar_zap(ANDRE_PESSOAL, "📊 V1018: Protocolo Anti-Kids Ativo.")
+        enviar_zap(ANDRE_PESSOAL, "📊 V1019: Modo Fast Track (Site) Ativo.")
         return
 
     # Processa Áudio
@@ -124,7 +126,8 @@ def executar_roberto(phone, msg, nome, audio_url=None):
 
     try:
         conn = get_db_connection(); cur = conn.cursor()
-        cur.execute("SELECT key_fact FROM episode_memory WHERE phone = %s ORDER BY timestamp DESC LIMIT 6", (phone_clean,))
+        # Aumentei o histórico para 8 mensagens para ele ler o "Textão" do site se estiver lá atrás
+        cur.execute("SELECT key_fact FROM episode_memory WHERE phone = %s ORDER BY timestamp DESC LIMIT 8", (phone_clean,))
         rows = cur.fetchall()
         hist = " | ".join([r[0] for r in rows[::-1]])
         
@@ -132,8 +135,8 @@ def executar_roberto(phone, msg, nome, audio_url=None):
         res = agente_redator({"nome": nome, "historico": hist, "mensagem_original": texto_input, "resposta_final": ""})
         resposta = res['resposta_final']
 
-        # Envia imagem SÓ se for simulação real e NÃO for rejeição
-        if "SIMULAÇÃO" in resposta and "agradeço o contato" not in resposta.lower():
+        # Envia imagem SÓ se for simulação NOVA gerada pelo ROBÔ (não a que veio do site)
+        if "SIMULAÇÃO" in resposta and "DETALHES DA COTAÇÃO" not in hist:
             enviar_imagem(phone_clean, BANNER_DOSSIE)
         
         enviar_zap(phone_clean, resposta)
@@ -152,12 +155,8 @@ def webhook_ads():
         nome = (dados.get('name') or "Parceiro").split(' ')[0]
 
         def iniciar():
-            # AQUECIMENTO: NÃO MANDA IMAGEM AGORA. SÓ TEXTO CURTO.
-            # Isso evita que o WhatsApp marque como spam visual massivo.
+            # MODO AQUECIMENTO (Apenas "Oi")
             msg = f"Olá {nome}, tudo bem?"
-            
-            # Manda só o "Oi" e espera.
-            # O resto o Roberto assume quando o cliente responder.
             enviar_zap(phone, msg)
             
             conn = get_db_connection(); cur = conn.cursor()
@@ -183,7 +182,7 @@ def whatsapp_hook():
     return jsonify({"status": "ok"}), 200
 
 @app.route('/')
-def home(): return "Roberto V1018 - Modo Aquecimento", 200
+def home(): return "Roberto V1019 - Fast Track Site", 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
